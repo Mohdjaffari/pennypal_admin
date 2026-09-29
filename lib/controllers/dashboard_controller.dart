@@ -5,6 +5,7 @@ import '../models/user_model.dart';
 import '../models/category_model.dart';
 import '../models/contact_model.dart';
 import '../services/dashboard_service.dart';
+import '../services/learning_service.dart';
 import '../services/user_service.dart';
 
 class DashboardController with ChangeNotifier {
@@ -79,10 +80,10 @@ class DashboardController with ChangeNotifier {
         },
       );
 
-      _learningSub = _dashboardService.getLearningStream().listen(
-        (snapshot) {
-          _cachedLearningCount = snapshot.docs.length;
-          _cachedFeaturedLearningCount = snapshot.docs.where((d) => (d.data()['isFeatured'] == true)).length;
+      _learningSub = LearningService().getCombinedLearningStream().listen(
+        (items) {
+          _cachedLearningCount = items.length;
+          _cachedFeaturedLearningCount = items.where((i) => i.isFeatured).length;
           _recomputeStats();
         },
         onError: (e) {

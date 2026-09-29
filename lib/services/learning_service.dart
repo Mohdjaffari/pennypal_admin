@@ -13,6 +13,15 @@ class LearningService {
   static const String _uploadPreset = "pennyPal";
   static const String _collectionName = "learning_content";
 
+  static const List<String> candidateCollections = [
+    "learning_content",
+    "learning",
+    "financial_learning",
+    "learnings",
+    "articles",
+    "learning_contents",
+  ];
+
   FirebaseFirestore? get firestore {
     try {
       if (Firebase.apps.isNotEmpty) {
@@ -73,7 +82,10 @@ class LearningService {
     }
 
     try {
-      final docRef = fs.collection(_collectionName).doc(generatedId);
+      final targetCollection = item.sourceCollection.isNotEmpty
+          ? item.sourceCollection
+          : _collectionName;
+      final docRef = fs.collection(targetCollection).doc(generatedId);
       await docRef.set(newItem.toMap()).timeout(const Duration(seconds: 10));
       return newItem;
     } catch (e) {
@@ -82,79 +94,187 @@ class LearningService {
     }
   }
 
-  Future<bool> updateLearningOnline(String id, Map<String, dynamic> updateData) async {
+  Future<bool> updateLearningOnline(
+    String id,
+    Map<String, dynamic> updateData, {
+    String? sourceCollection,
+  }) async {
     final fs = firestore;
     if (fs == null) return false;
 
-    try {
-      updateData['updatedAt'] = DateTime.now().toIso8601String();
-      await fs.collection(_collectionName).doc(id).update(updateData).timeout(const Duration(seconds: 10));
-      return true;
-    } catch (e) {
-      debugPrint("LearningService.updateLearningOnline error: $e");
-      rethrow;
+    updateData['updatedAt'] = DateTime.now().toIso8601String();
+
+    final collectionsToTry = [
+      if (sourceCollection != null && sourceCollection.isNotEmpty) sourceCollection,
+      ...candidateCollections,
+    ];
+
+    bool updated = false;
+    for (final col in collectionsToTry) {
+      try {
+        final docRef = fs.collection(col).doc(id);
+        final docSnap = await docRef.get();
+        if (docSnap.exists) {
+          await docRef.update(updateData).timeout(const Duration(seconds: 10));
+          updated = true;
+          break;
+        }
+      } catch (_) {}
     }
+
+    if (!updated) {
+      // Fallback: update in default collection
+      try {
+        await fs.collection(_collectionName).doc(id).update(updateData).timeout(const Duration(seconds: 10));
+        return true;
+      } catch (e) {
+        debugPrint("LearningService.updateLearningOnline fallback error: $e");
+        return false;
+      }
+    }
+
+    return updated;
   }
 
-  Future<bool> deleteLearningOnline(String id) async {
+  Future<bool> deleteLearningOnline(String id, {String? sourceCollection}) async {
     final fs = firestore;
     if (fs == null) return false;
 
-    try {
-      await fs.collection(_collectionName).doc(id).delete().timeout(const Duration(seconds: 10));
-      return true;
-    } catch (e) {
-      debugPrint("LearningService.deleteLearningOnline error: $e");
-      rethrow;
+    final collectionsToTry = [
+      if (sourceCollection != null && sourceCollection.isNotEmpty) sourceCollection,
+      ...candidateCollections,
+    ];
+
+    bool deleted = false;
+    for (final col in collectionsToTry) {
+      try {
+        final docRef = fs.collection(col).doc(id);
+        final docSnap = await docRef.get();
+        if (docSnap.exists) {
+          await docRef.delete().timeout(const Duration(seconds: 10));
+          deleted = true;
+        }
+      } catch (_) {}
     }
+
+    return deleted;
   }
 
-  static const List<String> _fallbackCollections = [
-    "learning",
-    "financial_learning",
-    "learnings",
-    "articles",
-  ];
+  /// Real-time multi-collection stream that continuously merges and deduplicates
+  /// all learning content across candidate collections in Firestore.
+  Stream<List<LearningContentModel>> getCombinedLearningStream() {
+    final fs = firestore;
+    if (fs == null) return Stream.value([]);
 
+    late StreamController<List<LearningContentModel>> controller;
+    final Map<String, List<LearningContentModel>> collectionCache = {};
+    final List<StreamSubscription> subscriptions = [];
+
+    void emitMerged() {
+      if (controller.isClosed) return;
+      final Map<String, LearningContentModel> merged = {};
+
+      for (final col in candidateCollections) {
+        final list = collectionCache[col] ?? [];
+        for (final item in list) {
+          if (!merged.containsKey(item.id)) {
+            merged[item.id] = item;
+          }
+        }
+      }
+
+      final results = merged.values.toList();
+      results.sort((a, b) {
+        if (a.isFeatured != b.isFeatured) {
+          return a.isFeatured ? -1 : 1;
+        }
+        return b.publishedDate.compareTo(a.publishedDate);
+      });
+
+      controller.add(results);
+    }
+
+    controller = StreamController<List<LearningContentModel>>.broadcast(
+      onListen: () {
+        for (final col in candidateCollections) {
+          try {
+            final sub = fs.collection(col).snapshots().listen(
+              (snap) {
+                final List<LearningContentModel> items = [];
+                for (final doc in snap.docs) {
+                  try {
+                    items.add(LearningContentModel.fromMap(
+                      doc.data(),
+                      docId: doc.id,
+                      sourceCollection: col,
+                    ));
+                  } catch (e) {
+                    debugPrint("Error parsing learning doc ${doc.id} in $col: $e");
+                  }
+                }
+                collectionCache[col] = items;
+                emitMerged();
+              },
+              onError: (e) {
+                debugPrint("Notice: Learning collection $col listener: $e");
+              },
+            );
+            subscriptions.add(sub);
+          } catch (e) {
+            debugPrint("Failed to attach listener for $col: $e");
+          }
+        }
+      },
+      onCancel: () {
+        for (final sub in subscriptions) {
+          sub.cancel();
+        }
+        subscriptions.clear();
+      },
+    );
+
+    return controller.stream;
+  }
+
+  /// One-time fetch with fallback across candidate collections
   Future<List<LearningContentModel>> fetchLearningOnline([String category = 'All']) async {
     final fs = firestore;
     if (fs == null) return [];
 
     try {
-      final List<LearningContentModel> results = [];
-      final primarySnap = await fs.collection(_collectionName).get().timeout(const Duration(seconds: 10));
-      for (final doc in primarySnap.docs) {
+      final Map<String, LearningContentModel> merged = {};
+      for (final col in candidateCollections) {
         try {
-          results.add(LearningContentModel.fromMap(doc.data(), docId: doc.id));
-        } catch (e) {
-          debugPrint("Error parsing learning doc ${doc.id}: $e");
-        }
-      }
-
-      // If primary collection is empty, check fallback collections
-      if (results.isEmpty) {
-        for (final col in _fallbackCollections) {
-          try {
-            final fbSnap = await fs.collection(col).get().timeout(const Duration(seconds: 5));
-            if (fbSnap.docs.isNotEmpty) {
-              for (final doc in fbSnap.docs) {
-                if (!results.any((r) => r.id == doc.id)) {
-                  try {
-                    results.add(LearningContentModel.fromMap(doc.data(), docId: doc.id));
-                  } catch (e) {
-                    debugPrint("Error parsing fallback learning doc ${doc.id}: $e");
-                  }
-                }
+          final snap = await fs.collection(col).get().timeout(const Duration(seconds: 6));
+          for (final doc in snap.docs) {
+            if (!merged.containsKey(doc.id)) {
+              try {
+                merged[doc.id] = LearningContentModel.fromMap(
+                  doc.data(),
+                  docId: doc.id,
+                  sourceCollection: col,
+                );
+              } catch (e) {
+                debugPrint("Error parsing doc ${doc.id} in $col: $e");
               }
-              if (results.isNotEmpty) break;
             }
-          } catch (_) {}
-        }
+          }
+        } catch (_) {}
       }
 
+      var results = merged.values.toList();
       if (category.isNotEmpty && category.toLowerCase() != 'all') {
-        return results.where((item) => item.category.trim().toLowerCase() == category.toLowerCase()).toList();
+        results = results
+            .where((item) => item.category.trim().toLowerCase() == category.toLowerCase())
+            .toList();
       }
+
+      results.sort((a, b) {
+        if (a.isFeatured != b.isFeatured) {
+          return a.isFeatured ? -1 : 1;
+        }
+        return b.publishedDate.compareTo(a.publishedDate);
+      });
 
       return results;
     } catch (e) {
@@ -163,14 +283,13 @@ class LearningService {
     }
   }
 
+  /// Legacy stream method for backwards compatibility
   Stream<QuerySnapshot<Map<String, dynamic>>> getLearningStream([String category = 'All']) {
     final fs = firestore;
     if (fs == null) {
       return const Stream.empty();
     }
-
     try {
-      // Stream the full collection so case-insensitive filtering can be done client-side
       return fs.collection(_collectionName).snapshots();
     } catch (e) {
       debugPrint("LearningService.getLearningStream error: $e");
@@ -178,7 +297,7 @@ class LearningService {
     }
   }
 
-  Future<bool> toggleFeaturedOnline(String id, bool isFeatured) async {
-    return updateLearningOnline(id, {'isFeatured': isFeatured});
+  Future<bool> toggleFeaturedOnline(String id, bool isFeatured, {String? sourceCollection}) async {
+    return updateLearningOnline(id, {'isFeatured': isFeatured}, sourceCollection: sourceCollection);
   }
 }

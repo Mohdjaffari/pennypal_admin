@@ -107,9 +107,18 @@ class DashboardService {
         }
       }
 
-      final learnSnap = await fs.collection(_learningCollection).get().timeout(const Duration(seconds: 10));
-      final int totalLearning = learnSnap.docs.length;
-      final int featuredLearning = learnSnap.docs.where((d) => (d.data()['isFeatured'] == true)).length;
+      int totalLearning = 0;
+      int featuredLearning = 0;
+      for (final col in ['learning_content', 'learning', 'financial_learning', 'learnings', 'articles', 'learning_contents']) {
+        try {
+          final learnSnap = await fs.collection(col).get().timeout(const Duration(seconds: 4));
+          if (learnSnap.docs.isNotEmpty) {
+            totalLearning = learnSnap.docs.length;
+            featuredLearning = learnSnap.docs.where((d) => (d.data()['isFeatured'] == true || d.data()['featured'] == true)).length;
+            break;
+          }
+        } catch (_) {}
+      }
 
       final faqsSnap = await fs.collection(_faqsCollection).get().timeout(const Duration(seconds: 10));
       final int totalFaqs = faqsSnap.docs.length;

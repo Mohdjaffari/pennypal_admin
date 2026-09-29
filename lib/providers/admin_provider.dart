@@ -61,8 +61,8 @@ class AdminProvider extends ChangeNotifier {
         notifyListeners();
       }, onError: (e) => debugPrint("AdminProvider: Categories stream error: $e"));
 
-      _learningSub = _learningService.getLearningStream().listen((snapshot) {
-        _learningContents = snapshot.docs.map((doc) => LearningContentModel.fromMap(doc.data(), docId: doc.id)).toList();
+      _learningSub = _learningService.getCombinedLearningStream().listen((items) {
+        _learningContents = items;
         notifyListeners();
       }, onError: (e) => debugPrint("AdminProvider: Learning stream error: $e"));
 
@@ -741,22 +741,19 @@ class AdminProvider extends ChangeNotifier {
   String _notificationFilter = 'All'; // 'All', 'Contact Inquiries', 'User Reviews', 'Unread'
   String _notificationSearchQuery = '';
   final Set<String> _locallyReadNotifIds = {};
+  final Set<String> _dismissedNotifIds = {};
 
-  List<NotificationModel> get notifications => feedbackAndContactNotifications;
+  List<NotificationModel> get notifications => allNotifications;
   bool get isNotificationsLoading => _isNotificationsLoading;
   String? get notificationsError => _notificationsError;
   String get notificationFilter => _notificationFilter;
   String get notificationSearchQuery => _notificationSearchQuery;
 
-  /// Exclusively returns notifications for user feedback and contact messages sent by users:
-  List<NotificationModel> get feedbackAndContactNotifications {
-    // 1. Gather all existing explicit notifications of feedback & contact types
-    final explicitNotifs = _notifications.where((n) =>
-        n.type == NotificationType.contactMessage ||
-        n.type == NotificationType.feedbackReceived).toList();
-
+  /// Returns all notifications (explicit Firestore alerts + synthesized feedback/inquiries)
+  List<NotificationModel> get allNotifications {
     final Set<String> existingRefIds = {};
-    for (var n in explicitNotifs) {
+    for (var n in _notifications) {
+      if (_dismissedNotifIds.contains(n.id)) continue;
       if (n.referenceId != null) {
         existingRefIds.add(n.referenceId!);
       }
@@ -764,15 +761,17 @@ class AdminProvider extends ChangeNotifier {
     }
 
     final List<NotificationModel> combined = [];
-    for (var n in explicitNotifs) {
+    for (var n in _notifications) {
+      if (_dismissedNotifIds.contains(n.id)) continue;
       final isLocallyRead = _locallyReadNotifIds.contains(n.id);
       combined.add(n.copyWith(isRead: n.isRead || isLocallyRead));
     }
 
-    // 2. Synthesize notifications from actual feedback items if not already present
+    // Synthesize notifications from actual feedback items if not already present
     for (var fb in _feedbacks) {
+      final notifId = 'fb_${fb.id}';
+      if (_dismissedNotifIds.contains(notifId) || _dismissedNotifIds.contains(fb.id)) continue;
       if (!existingRefIds.contains(fb.id)) {
-        final notifId = 'fb_${fb.id}';
         final isLocallyRead = _locallyReadNotifIds.contains(notifId) || fb.isReviewed;
         combined.add(NotificationModel(
           id: notifId,
@@ -795,10 +794,11 @@ class AdminProvider extends ChangeNotifier {
       }
     }
 
-    // 3. Synthesize notifications from actual contact inquiry items if not already present
+    // Synthesize notifications from actual contact inquiry items if not already present
     for (var msg in _contactMessages) {
+      final notifId = 'contact_${msg.id}';
+      if (_dismissedNotifIds.contains(notifId) || _dismissedNotifIds.contains(msg.id)) continue;
       if (!existingRefIds.contains(msg.id)) {
-        final notifId = 'contact_${msg.id}';
         final isLocallyRead = _locallyReadNotifIds.contains(notifId) || msg.status == ContactStatus.resolved;
         combined.add(NotificationModel(
           id: notifId,
@@ -821,31 +821,52 @@ class AdminProvider extends ChangeNotifier {
       }
     }
 
-    // Sort newest first
     combined.sort((a, b) => b.createdAt.compareTo(a.createdAt));
     return combined;
   }
 
+  /// Exclusively returns notifications for user feedback and contact messages
+  List<NotificationModel> get feedbackAndContactNotifications {
+    return allNotifications.where((n) =>
+        n.type == NotificationType.contactMessage ||
+        n.type == NotificationType.feedbackReceived).toList();
+  }
+
   int get unreadNotificationsCount =>
-      feedbackAndContactNotifications.where((n) => !n.isRead).length;
+      allNotifications.where((n) => !n.isRead).length;
+
+  int get totalNotificationsCount =>
+      allNotifications.length;
 
   int get totalInquiryFeedbackNotificationsCount =>
       feedbackAndContactNotifications.length;
 
   int get contactInquiriesNotificationCount =>
-      feedbackAndContactNotifications.where((n) => n.type == NotificationType.contactMessage).length;
+      allNotifications.where((n) => n.type == NotificationType.contactMessage).length;
 
   int get userReviewsNotificationCount =>
-      feedbackAndContactNotifications.where((n) => n.type == NotificationType.feedbackReceived).length;
+      allNotifications.where((n) => n.type == NotificationType.feedbackReceived).length;
+
+  int get broadcastNotificationCount =>
+      allNotifications.where((n) => n.type == NotificationType.broadcastAnnouncement).length;
+
+  int get academyNotificationCount =>
+      allNotifications.where((n) => n.type == NotificationType.learningPublished).length;
 
   List<NotificationModel> get filteredNotifications {
-    var list = feedbackAndContactNotifications;
+    var list = allNotifications;
 
     // Filter by tab
-    if (_notificationFilter == 'Contact Inquiries') {
+    if (_notificationFilter == 'Contact Inquiries' || _notificationFilter == 'Contact Support') {
       list = list.where((n) => n.type == NotificationType.contactMessage).toList();
-    } else if (_notificationFilter == 'User Reviews') {
+    } else if (_notificationFilter == 'User Reviews' || _notificationFilter == 'User Feedback') {
       list = list.where((n) => n.type == NotificationType.feedbackReceived).toList();
+    } else if (_notificationFilter == 'Broadcasts' || _notificationFilter == 'Announcements') {
+      list = list.where((n) => n.type == NotificationType.broadcastAnnouncement).toList();
+    } else if (_notificationFilter == 'Academy' || _notificationFilter == 'Learning') {
+      list = list.where((n) => n.type == NotificationType.learningPublished).toList();
+    } else if (_notificationFilter == 'System & Users' || _notificationFilter == 'System Alerts') {
+      list = list.where((n) => n.type == NotificationType.systemAlert || n.type == NotificationType.userRegistered).toList();
     } else if (_notificationFilter == 'Unread') {
       list = list.where((n) => !n.isRead).toList();
     }
@@ -873,8 +894,35 @@ class AdminProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> toggleNotificationReadStatus(String id) async {
+    final notif = allNotifications.firstWhere((n) => n.id == id, orElse: () => _notifications.first);
+    final isCurrentlyRead = notif.isRead || _locallyReadNotifIds.contains(id);
+
+    if (isCurrentlyRead) {
+      _locallyReadNotifIds.remove(id);
+      final idx = _notifications.indexWhere((n) => n.id == id);
+      if (idx != -1) {
+        _notifications[idx] = _notifications[idx].copyWith(isRead: false);
+      }
+      notifyListeners();
+      try {
+        if (!id.startsWith('fb_') && !id.startsWith('contact_')) {
+          await _notificationService.firestore?.collection(NotificationService.collectionName).doc(id).update({'isRead': false});
+        }
+      } catch (e) {
+        debugPrint("Error unmarking notification: $e");
+      }
+    } else {
+      await markNotificationAsRead(id);
+    }
+  }
+
   Future<void> markNotificationAsRead(String id) async {
     _locallyReadNotifIds.add(id);
+    final idx = _notifications.indexWhere((n) => n.id == id);
+    if (idx != -1) {
+      _notifications[idx] = _notifications[idx].copyWith(isRead: true);
+    }
     notifyListeners();
     try {
       if (!id.startsWith('fb_') && !id.startsWith('contact_')) {
@@ -886,7 +934,7 @@ class AdminProvider extends ChangeNotifier {
   }
 
   Future<void> markAllNotificationsAsRead() async {
-    for (var n in feedbackAndContactNotifications) {
+    for (var n in allNotifications) {
       _locallyReadNotifIds.add(n.id);
     }
     _notifications = _notifications.map((n) => n.copyWith(isRead: true)).toList();
@@ -900,6 +948,7 @@ class AdminProvider extends ChangeNotifier {
 
   Future<void> deleteNotification(String id) async {
     try {
+      _dismissedNotifIds.add(id);
       if (!id.startsWith('fb_') && !id.startsWith('contact_')) {
         await _notificationService.deleteNotification(id);
       }
@@ -911,8 +960,32 @@ class AdminProvider extends ChangeNotifier {
     }
   }
 
+  Future<void> deleteMultipleNotifications(List<String> ids) async {
+    try {
+      _dismissedNotifIds.addAll(ids);
+      for (final id in ids) {
+        if (!id.startsWith('fb_') && !id.startsWith('contact_')) {
+          await _notificationService.deleteNotification(id);
+        }
+      }
+      _notifications.removeWhere((n) => ids.contains(n.id));
+      _locallyReadNotifIds.removeAll(ids);
+      notifyListeners();
+    } catch (e) {
+      debugPrint("Error deleting multiple notifications: $e");
+    }
+  }
+
+  Future<void> markMultipleNotificationsAsRead(List<String> ids) async {
+    for (final id in ids) {
+      await markNotificationAsRead(id);
+    }
+  }
+
   Future<void> clearAllNotifications() async {
     try {
+      final allCurrentIds = allNotifications.map((n) => n.id).toList();
+      _dismissedNotifIds.addAll(allCurrentIds);
       await _notificationService.clearAllNotifications();
       _notifications.clear();
       _locallyReadNotifIds.clear();
@@ -922,7 +995,7 @@ class AdminProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> createBroadcastNotification({
+  Future<bool> createBroadcastNotification({
     required String title,
     required String message,
     required NotificationType type,
@@ -931,16 +1004,21 @@ class AdminProvider extends ChangeNotifier {
   }) async {
     try {
       final notif = NotificationModel(
-        id: '',
-        title: title,
-        message: message,
+        id: 'NOTIF-${DateTime.now().millisecondsSinceEpoch}',
+        title: title.trim(),
+        message: message.trim(),
         type: type,
         target: target,
         createdAt: DateTime.now(),
         isRead: false,
         metadata: data,
       );
-      await _notificationService.createNotification(notif);
+      final success = await _notificationService.createNotification(notif);
+      if (success) {
+        _notifications.insert(0, notif);
+        notifyListeners();
+      }
+      return success;
     } catch (e) {
       debugPrint("Error creating broadcast notification: $e");
       rethrow;

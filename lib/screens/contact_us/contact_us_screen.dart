@@ -813,7 +813,9 @@ class _ContactUsScreenState extends State<ContactUsScreen> {
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
           titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
           contentPadding: const EdgeInsets.symmetric(horizontal: 20),
-          actionsPadding: const EdgeInsets.all(16),
+          actionsPadding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+          actionsOverflowButtonSpacing: 8,
+          actionsOverflowAlignment: OverflowBarAlignment.end,
           title: Row(
             children: [
               Container(
@@ -832,10 +834,12 @@ class _ContactUsScreenState extends State<ContactUsScreen> {
                     Text(
                       'Reply to ${msg.senderName}',
                       style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      overflow: TextOverflow.ellipsis,
                     ),
                     Text(
                       msg.senderEmail,
                       style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ],
                 ),
@@ -897,6 +901,8 @@ class _ContactUsScreenState extends State<ContactUsScreen> {
                           child: Text(
                             tpl.length > 38 ? '${tpl.substring(0, 38)}...' : tpl,
                             style: const TextStyle(fontSize: 11, color: AppColors.primary),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                       );
@@ -914,14 +920,36 @@ class _ContactUsScreenState extends State<ContactUsScreen> {
                   const SizedBox(height: 6),
                   DropdownButtonFormField<ContactStatus>(
                     initialValue: newStatus,
+                    isExpanded: true,
                     decoration: InputDecoration(
                       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                     ),
                     items: const [
-                      DropdownMenuItem(value: ContactStatus.resolved, child: Text('Resolved & Closed (Recommended)')),
-                      DropdownMenuItem(value: ContactStatus.inProgress, child: Text('In Progress (Follow-up needed)')),
-                      DropdownMenuItem(value: ContactStatus.newMsg, child: Text('Keep as New')),
+                      DropdownMenuItem(
+                        value: ContactStatus.resolved,
+                        child: Text(
+                          'Resolved & Closed (Recommended)',
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 12.5),
+                        ),
+                      ),
+                      DropdownMenuItem(
+                        value: ContactStatus.inProgress,
+                        child: Text(
+                          'In Progress (Follow-up needed)',
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 12.5),
+                        ),
+                      ),
+                      DropdownMenuItem(
+                        value: ContactStatus.newMsg,
+                        child: Text(
+                          'Keep as New',
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 12.5),
+                        ),
+                      ),
                     ],
                     onChanged: (val) => setDialogState(() => newStatus = val!),
                   ),
@@ -936,6 +964,7 @@ class _ContactUsScreenState extends State<ContactUsScreen> {
             ),
             CustomButton(
               text: 'Save & Submit Response',
+              height: 42,
               onPressed: () {
                 if (replyCtrl.text.trim().isNotEmpty) {
                   provider.replyToContact(msg.id, replyCtrl.text.trim());

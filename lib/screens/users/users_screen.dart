@@ -350,41 +350,10 @@ class _UsersScreenState extends State<UsersScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding: const EdgeInsets.all(18),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: AppColors.primarySoft,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: const Icon(Icons.people_alt_rounded, color: AppColors.primary, size: 20),
-                    ),
-                    const SizedBox(width: 12),
-                    const Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'User Accounts Directory',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.textPrimary,
-                          ),
-                        ),
-                        Text(
-                          'Comprehensive registry with account management actions',
-                          style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-                Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final badgeWidget = Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
                     color: AppColors.primarySoft,
@@ -398,8 +367,47 @@ class _UsersScreenState extends State<UsersScreen> {
                       color: AppColors.primary,
                     ),
                   ),
-                ),
-              ],
+                );
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: AppColors.primarySoft,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(Icons.people_alt_rounded, color: AppColors.primary, size: 20),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'User Accounts Directory',
+                            style: const TextStyle(
+                              fontSize: 15.5,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.textPrimary,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          Text(
+                            'Comprehensive registry with account actions',
+                            style: const TextStyle(fontSize: 11.5, color: AppColors.textSecondary),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    badgeWidget,
+                  ],
+                );
+              },
             ),
           ),
           const Divider(height: 1),

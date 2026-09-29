@@ -177,6 +177,7 @@ class LearningController with ChangeNotifier {
     Uint8List? newImageBytes,
     String? newImageFileName,
     String? existingImageUrl,
+    String? sourceCollection,
   }) async {
     _isLoading = true;
     _errorMessage = null;
@@ -203,7 +204,11 @@ class LearningController with ChangeNotifier {
         updateData['imageUrl'] = existingImageUrl;
       }
 
-      final success = await _learningService.updateLearningOnline(id, updateData);
+      final success = await _learningService.updateLearningOnline(
+        id,
+        updateData,
+        sourceCollection: sourceCollection,
+      );
       if (success) {
         final idx = _articles.indexWhere((a) => a.id == id);
         if (idx != -1) {
@@ -234,12 +239,15 @@ class LearningController with ChangeNotifier {
   }
 
   /// Deletes a learning article from Firestore
-  Future<bool> deleteLearningArticle(String id) async {
+  Future<bool> deleteLearningArticle(String id, {String? sourceCollection}) async {
     _isLoading = true;
     notifyListeners();
 
     try {
-      final success = await _learningService.deleteLearningOnline(id);
+      final success = await _learningService.deleteLearningOnline(
+        id,
+        sourceCollection: sourceCollection,
+      );
       if (success) {
         _articles.removeWhere((a) => a.id == id);
       }
@@ -256,12 +264,14 @@ class LearningController with ChangeNotifier {
   }
 
   /// Toggles featured status of an article in Firestore
-  Future<bool> toggleFeatured(String id, bool currentStatus) async {
+  Future<bool> toggleFeatured(String id, bool currentStatus, {String? sourceCollection}) async {
     try {
       final newStatus = !currentStatus;
-      final success = await _learningService.updateLearningOnline(id, {
-        'isFeatured': newStatus,
-      });
+      final success = await _learningService.updateLearningOnline(
+        id,
+        {'isFeatured': newStatus},
+        sourceCollection: sourceCollection,
+      );
       if (success) {
         final idx = _articles.indexWhere((a) => a.id == id);
         if (idx != -1) {
@@ -276,8 +286,13 @@ class LearningController with ChangeNotifier {
     }
   }
 
-  /// Real-time Firestore stream for learning content
+  /// Real-time Firestore stream for learning content (legacy QuerySnapshot)
   Stream<QuerySnapshot<Map<String, dynamic>>> getLearningStream(String category) {
     return _learningService.getLearningStream(category);
+  }
+
+  /// Real-time combined multi-collection stream yielding parsed, deduplicated articles
+  Stream<List<LearningContentModel>> getCombinedLearningStream([String category = 'All']) {
+    return _learningService.getCombinedLearningStream();
   }
 }
